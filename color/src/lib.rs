@@ -36,12 +36,12 @@ mod floatfuncs;
 pub use bitset::Bitset;
 pub use color::{AlphaColor, HueDirection, OpaqueColor, PremulColor};
 pub use colorspace::{
-    Colorspace, ColorspaceLayout, DisplayP3, LinearSrgb, Oklab, Oklch, Srgb, XyzD65,
+    ColorSpace, ColorSpaceLayout, DisplayP3, LinearSrgb, Oklab, Oklch, Srgb, XyzD65,
 };
 pub use css::{CssColor, Interpolator};
 pub use gradient::{gradient, GradientIter};
 pub use parse::{parse_color, Error};
-pub use tagged::{ColorspaceTag, TaggedColor};
+pub use tagged::{ColorSpaceTag, TaggedColor};
 
 const fn u8_to_f32(x: u32) -> f32 {
     x as f32 * (1.0 / 255.0)

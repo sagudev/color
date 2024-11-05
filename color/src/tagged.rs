@@ -1,26 +1,26 @@
 // Copyright 2024 the Color Authors
 // SPDX-License-Identifier: Apache-2.0 OR MIT
 
-//! Colors with runtime choice of colorspace.
+//! Colors with runtime choice of color space.
 
 use crate::{
     color::{add_alpha, split_alpha},
-    AlphaColor, Bitset, Colorspace, ColorspaceLayout, DisplayP3, LinearSrgb, Oklab, Oklch, Srgb,
+    AlphaColor, Bitset, ColorSpace, ColorSpaceLayout, DisplayP3, LinearSrgb, Oklab, Oklch, Srgb,
     XyzD65,
 };
 
-/// The colorspace tag for tagged colors.
+/// The color space tag for tagged colors.
 ///
-/// This represents a fixed set of known colorspaces. The set is
+/// This represents a fixed set of known color spaces. The set is
 /// based on the CSS Color 4 spec, but might also extend to a small
-/// set of colorspaces used in 3D graphics.
+/// set of color spaces used in 3D graphics.
 ///
 /// Note: this has some tags not yet implemented.
 ///
-/// Note: when adding an RGB-like colorspace, add to `same_analogous`.
+/// Note: when adding an RGB-like color space, add to `same_analogous`.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 #[non_exhaustive]
-pub enum ColorspaceTag {
+pub enum ColorSpaceTag {
     Srgb,
     LinearSrgb,
     Lab,
@@ -33,28 +33,28 @@ pub enum ColorspaceTag {
     XyzD65,
 }
 
-/// A color with a runtime colorspace tag. This type will likely get merged with
+/// A color with a runtime color space tag. This type will likely get merged with
 /// [`CssColor`][crate::css::CssColor].
 #[derive(Clone, Copy, Debug)]
 pub struct TaggedColor {
-    pub cs: ColorspaceTag,
+    pub cs: ColorSpaceTag,
     pub components: [f32; 4],
 }
 
-impl ColorspaceTag {
-    pub(crate) fn layout(self) -> ColorspaceLayout {
+impl ColorSpaceTag {
+    pub(crate) fn layout(self) -> ColorSpaceLayout {
         match self {
-            Self::Lch | Self::Oklch => ColorspaceLayout::HueThird,
-            Self::Hsl | Self::Hwb => ColorspaceLayout::HueFirst,
-            _ => ColorspaceLayout::Rectangular,
+            Self::Lch | Self::Oklch => ColorSpaceLayout::HueThird,
+            Self::Hsl | Self::Hwb => ColorSpaceLayout::HueFirst,
+            _ => ColorSpaceLayout::Rectangular,
         }
     }
 
-    // Note: if colorspaces are the same, then they're also analogous, but
+    // Note: if color spaces are the same, then they're also analogous, but
     // in that case we wouldn't do the conversion, so this function is not
     // guaranteed to return the correct answer in those cases.
     pub(crate) fn same_analogous(self, other: Self) -> bool {
-        use ColorspaceTag::*;
+        use ColorSpaceTag::*;
         matches!(
             (self, other),
             (
@@ -66,7 +66,7 @@ impl ColorspaceTag {
     }
 
     pub(crate) fn l_missing(self, missing: Bitset) -> bool {
-        use ColorspaceTag::*;
+        use ColorSpaceTag::*;
         match self {
             Lab | Lch | Oklab | Oklch => missing.contains(0),
             Hsl => missing.contains(2),
@@ -75,7 +75,7 @@ impl ColorspaceTag {
     }
 
     pub(crate) fn set_l_missing(self, missing: &mut Bitset, components: &mut [f32; 4]) {
-        use ColorspaceTag::*;
+        use ColorSpaceTag::*;
         match self {
             Lab | Lch | Oklab | Oklch => {
                 missing.set(0);
@@ -90,7 +90,7 @@ impl ColorspaceTag {
     }
 
     pub(crate) fn c_missing(self, missing: Bitset) -> bool {
-        use ColorspaceTag::*;
+        use ColorSpaceTag::*;
         match self {
             Lab | Lch | Oklab | Oklch | Hsl => missing.contains(1),
             _ => false,
@@ -98,7 +98,7 @@ impl ColorspaceTag {
     }
 
     pub(crate) fn set_c_missing(self, missing: &mut Bitset, components: &mut [f32; 4]) {
-        use ColorspaceTag::*;
+        use ColorSpaceTag::*;
         match self {
             Lab | Lch | Oklab | Oklch | Hsl => {
                 missing.set(1);
@@ -147,7 +147,7 @@ impl ColorspaceTag {
 
     /// Scale the chroma by the given amount.
     ///
-    /// See [`Colorspace::scale_chroma`] for more details.
+    /// See [`ColorSpace::scale_chroma`] for more details.
     pub fn scale_chroma(self, src: [f32; 3], scale: f32) -> [f32; 3] {
         match self {
             Self::LinearSrgb => LinearSrgb::scale_chroma(src, scale),
@@ -163,15 +163,15 @@ impl ColorspaceTag {
 }
 
 impl TaggedColor {
-    pub fn from_linear_srgb(rgba: [f32; 4], cs: ColorspaceTag) -> Self {
+    pub fn from_linear_srgb(rgba: [f32; 4], cs: ColorSpaceTag) -> Self {
         let (rgb, alpha) = split_alpha(rgba);
         let opaque = cs.from_linear_srgb(rgb);
         let components = add_alpha(opaque, alpha);
         Self { cs, components }
     }
 
-    pub fn from_alpha_color<T: Colorspace>(color: AlphaColor<T>) -> Self {
-        if let Some(cs) = T::CS_TAG {
+    pub fn from_alpha_color<CS: ColorSpace>(color: AlphaColor<CS>) -> Self {
+        if let Some(cs) = CS::TAG {
             Self {
                 cs,
                 components: color.components,
@@ -179,25 +179,25 @@ impl TaggedColor {
         } else {
             let components = color.convert::<LinearSrgb>().components;
             Self {
-                cs: ColorspaceTag::LinearSrgb,
+                cs: ColorSpaceTag::LinearSrgb,
                 components,
             }
         }
     }
 
-    pub fn to_alpha_color<T: Colorspace>(&self) -> AlphaColor<T> {
-        if T::CS_TAG == Some(self.cs) {
+    pub fn to_alpha_color<CS: ColorSpace>(&self) -> AlphaColor<CS> {
+        if CS::TAG == Some(self.cs) {
             AlphaColor::new(self.components)
         } else {
             let (opaque, alpha) = split_alpha(self.components);
             let rgb = self.cs.to_linear_srgb(opaque);
-            let components = add_alpha(T::from_linear_srgb(rgb), alpha);
+            let components = add_alpha(CS::from_linear_srgb(rgb), alpha);
             AlphaColor::new(components)
         }
     }
 
     #[must_use]
-    pub fn convert(self, cs: ColorspaceTag) -> Self {
+    pub fn convert(self, cs: ColorSpaceTag) -> Self {
         if self.cs == cs {
             self
         } else {
