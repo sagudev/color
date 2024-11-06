@@ -75,6 +75,26 @@ pub trait ColorSpace: Clone + Copy + 'static {
             TargetCS::from_linear_srgb(lin_rgb)
         }
     }
+
+    /// Clip the color's components to fit within the natural gamut of the color space.
+    ///
+    /// There are many possible ways to map colors outside of a color space's gamut to colors
+    /// inside the gamut. Some methods are perceptually better than others (for example, preserving
+    /// the mapped color's hue is usually preferred over preserving saturation). This method will
+    /// generally do the mathematically simplest thing, namely clamping the individual color
+    /// components' values to the color space's natural limits of those components, bringing
+    /// out-of-gamut colors just onto the gamut boundary. The resultant color may be perceptually
+    /// quite distinct from the original color.
+    ///
+    /// # Examples
+    ///
+    /// ```rust
+    /// use color::{ColorSpace, Srgb, XyzD65};
+    ///
+    /// assert_eq!(Srgb::clip([0.4, -0.2, 1.2]), [0.4, 0., 1.]);
+    /// assert_eq!(XyzD65::clip([0.4, -0.2, 1.2]), [0.4, -0.2, 1.2]);
+    /// ```
+    fn clip(src: [f32; 3]) -> [f32; 3];
 }
 
 /// The layout of a color space, particularly the hue channel.
@@ -139,6 +159,10 @@ impl ColorSpace for LinearSrgb {
         ];
         matmul(&OKLAB_LMS_TO_SRGB, lms_scaled.map(|x| x * x * x))
     }
+
+    fn clip([r, g, b]: [f32; 3]) -> [f32; 3] {
+        [r.clamp(0., 1.), g.clamp(0., 1.), b.clamp(0., 1.)]
+    }
 }
 
 // It might be a better idea to write custom debug impls for AlphaColor and friends
@@ -171,6 +195,10 @@ impl ColorSpace for Srgb {
     fn from_linear_srgb(src: [f32; 3]) -> [f32; 3] {
         src.map(lin_to_srgb)
     }
+
+    fn clip([r, g, b]: [f32; 3]) -> [f32; 3] {
+        [r.clamp(0., 1.), g.clamp(0., 1.), b.clamp(0., 1.)]
+    }
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -195,6 +223,10 @@ impl ColorSpace for DisplayP3 {
             [0.017_082_632, 0.072_397_44, 0.910_519_96],
         ];
         matmul(&LINEAR_SRGB_TO_DISPLAYP3, src).map(lin_to_srgb)
+    }
+
+    fn clip([r, g, b]: [f32; 3]) -> [f32; 3] {
+        [r.clamp(0., 1.), g.clamp(0., 1.), b.clamp(0., 1.)]
     }
 }
 
@@ -222,6 +254,10 @@ impl ColorSpace for XyzD65 {
             [0.019_330_818, 0.119_194_78, 0.950_532_14],
         ];
         matmul(&LINEAR_SRGB_TO_XYZ, src)
+    }
+
+    fn clip([x, y, z]: [f32; 3]) -> [f32; 3] {
+        [x, y, z]
     }
 }
 
@@ -282,6 +318,10 @@ impl ColorSpace for Oklab {
             TargetCS::from_linear_srgb(lin_rgb)
         }
     }
+
+    fn clip([l, a, b]: [f32; 3]) -> [f32; 3] {
+        [l.clamp(0., 1.), a, b]
+    }
 }
 
 /// Rectangular to cylindrical conversion.
@@ -331,5 +371,9 @@ impl ColorSpace for Oklch {
             let lin_rgb = Self::to_linear_srgb(src);
             TargetCS::from_linear_srgb(lin_rgb)
         }
+    }
+
+    fn clip([l, c, h]: [f32; 3]) -> [f32; 3] {
+        [l.clamp(0., 1.), c.max(0.), h]
     }
 }
