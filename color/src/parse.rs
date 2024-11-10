@@ -387,6 +387,26 @@ impl<'a> Parser<'a> {
         Ok(color_from_components([l, c, h, alpha], tag))
     }
 
+    fn hsl(&mut self) -> Result<DynamicColor, ParseError> {
+        if !self.raw_ch(b'(') {
+            return Err(ParseError::ExpectedArguments);
+        }
+        let h = self.angle()?;
+        let comma = self.ch(b',');
+        let s = self.scaled_component(1., 1.)?.map(|x| x.max(0.));
+        self.optional_comma(comma)?;
+        let l = self.scaled_component(1., 1.)?;
+        let mut alpha = Some(1.0);
+        if self.opacity_separator(comma) {
+            alpha = self.scaled_component(1., 0.01)?.map(|a| a.clamp(0., 1.));
+        }
+        self.ws();
+        if !self.ch(b')') {
+            return Err(ParseError::ExpectedClosingParenthesis);
+        }
+        Ok(color_from_components([h, s, l, alpha], ColorSpaceTag::Hsl))
+    }
+
     fn color(&mut self) -> Result<DynamicColor, ParseError> {
         if !self.raw_ch(b'(') {
             return Err(ParseError::ExpectedArguments);
@@ -434,7 +454,7 @@ pub fn parse_color(s: &str) -> Result<DynamicColor, ParseError> {
             "lch" => parser.lch(100.0, 1.25, ColorSpaceTag::Lch),
             "oklab" => parser.lab(1.0, 0.004, ColorSpaceTag::Oklab),
             "oklch" => parser.lch(1.0, 0.004, ColorSpaceTag::Oklch),
-            "transparent" => Ok(color_from_components([Some(0.); 4], ColorSpaceTag::Srgb)),
+            "hsl" | "hsla" => parser.hsl(),
             "color" => parser.color(),
             _ => {
                 if let Some([r, g, b, a]) = crate::x11_colors::lookup_palette(id) {
