@@ -355,6 +355,72 @@ impl ColorSpace for A98Rgb {
     }
 }
 
+/// 🌌 The ProPhoto RGB color space.
+///
+/// ProPhoto RGB is similar to [sRGB](`Srgb`) but has higher red, green and blue chromaticities,
+/// thereby extending its gamut over sRGB on all components. ProPhoto RGB has a reference white of
+/// D50; see the [XYZ-D65 color space](`XyzD65`) documentation for some background information on
+/// the meaning of "reference white."
+///
+/// Its components are `[r, g, b]` (red, green, and blue channels respectively), with `[0, 0, 0]`
+/// pure black and `[1, 1, 1]` white. The natural bounds of the channels are `[0, 1]`.
+///
+/// This corresponds to the color space in [CSS Color Module Level 4 § 10.6][css-sec] and is
+/// [characterized by the ICC][icc].
+///
+/// ProPhoto RGB is also known as ROMM RGB.
+///
+/// [css-sec]: https://www.w3.org/TR/css-color-4/#predefined-prophoto-rgb
+/// [icc]: https://www.color.org/chardata/rgb/rommrgb.xalter
+#[derive(Clone, Copy, Debug)]
+pub struct ProphotoRgb;
+
+impl ColorSpace for ProphotoRgb {
+    const TAG: Option<ColorSpaceTag> = Some(ColorSpaceTag::ProphotoRgb);
+
+    fn to_linear_srgb([r, g, b]: [f32; 3]) -> [f32; 3] {
+        // XYZ_to_lin_sRGB * D50_to_D65 * lin_prophoto_to_XYZ
+        const LINEAR_PROPHOTORGB_TO_SRGB: [[f32; 3]; 3] = [
+            [2.034_367_6, -0.727_634_5, -0.306_733_07],
+            [-0.228_826_79, 1.231_753_3, -0.002_926_598],
+            [-0.008_558_424, -0.153_268_2, 1.161_826_6],
+        ];
+
+        fn transfer(x: f32) -> f32 {
+            if x.abs() <= 16. / 512. {
+                x / 16.
+            } else {
+                x.abs().powf(1.8).copysign(x)
+            }
+        }
+
+        matmul(&LINEAR_PROPHOTORGB_TO_SRGB, [r, g, b].map(transfer))
+    }
+
+    fn from_linear_srgb([r, g, b]: [f32; 3]) -> [f32; 3] {
+        // XYZ_to_lin_prophoto * D65_to_D50 * lin_sRGB_to_XYZ
+        const LINEAR_SRGB_TO_PROPHOTORGB: [[f32; 3]; 3] = [
+            [0.529_280_4, 0.330_153, 0.140_566_6],
+            [0.098_366_22, 0.873_463_9, 0.028_169_824],
+            [0.016_875_342, 0.117_659_41, 0.865_465_2],
+        ];
+
+        fn transfer(x: f32) -> f32 {
+            if x.abs() <= 1. / 512. {
+                x * 16.
+            } else {
+                x.abs().powf(1. / 1.8).copysign(x)
+            }
+        }
+
+        matmul(&LINEAR_SRGB_TO_PROPHOTORGB, [r, g, b]).map(transfer)
+    }
+
+    fn clip([r, g, b]: [f32; 3]) -> [f32; 3] {
+        [r.clamp(0., 1.), g.clamp(0., 1.), b.clamp(0., 1.)]
+    }
+}
+
 /// 🌌 The CIE XYZ color space with a 2° observer and a reference white of D50.
 ///
 /// Its components are `[X, Y, Z]`. The components are unbounded, but are usually positive.
@@ -969,7 +1035,7 @@ impl ColorSpace for Hwb {
 
 #[cfg(test)]
 mod tests {
-    use crate::{A98Rgb, ColorSpace, OpaqueColor, Srgb};
+    use crate::{A98Rgb, ColorSpace, OpaqueColor, ProphotoRgb, Srgb};
 
     fn almost_equal<CS: ColorSpace>(col1: [f32; 3], col2: [f32; 3]) -> bool {
         OpaqueColor::<CS>::new(col1).difference(OpaqueColor::new(col2)) < 1e-4
@@ -983,6 +1049,23 @@ mod tests {
         ] {
             assert!(almost_equal::<Srgb>(srgb, A98Rgb::convert::<Srgb>(a98)));
             assert!(almost_equal::<A98Rgb>(a98, Srgb::convert::<A98Rgb>(srgb)));
+        }
+    }
+
+    #[test]
+    fn prophotorgb_srgb() {
+        for (srgb, prophoto) in [
+            ([0.1, 0.2, 0.3], [0.133136, 0.147659, 0.223581]),
+            ([0., 1., 0.], [0.540282, 0.927599, 0.304566]),
+        ] {
+            assert!(almost_equal::<Srgb>(
+                srgb,
+                ProphotoRgb::convert::<Srgb>(prophoto)
+            ));
+            assert!(almost_equal::<ProphotoRgb>(
+                prophoto,
+                Srgb::convert::<ProphotoRgb>(srgb)
+            ));
         }
     }
 }
