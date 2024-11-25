@@ -540,6 +540,64 @@ impl ColorSpace for Rec2020 {
     }
 }
 
+/// 🌌 The ACEScg color space.
+///
+/// This color space is defined by the Academy Color Encoding System [specification][acescg].
+///
+/// The ACEScg color space is a linear color space. The wide gamut makes this color space useful as
+/// a working space for computer graphics.
+///
+/// Other ACES color spaces include ACES2065-1, ACEScc, and ACEScct. This crate currently does not
+/// support these color spaces.
+///
+/// The ACEScg components are `[R, G, B]`. The components are bounded to `[-65504.0, 65504.0]`,
+/// though it is unusual to clip in this color space.
+///
+/// ACEScg has a reference white [near D60][aceswp]; see the
+/// [XYZ-D65 color space](`XyzD65`) documentation for some background information on the meaning of
+/// "reference white."
+///
+/// [acescg]: https://docs.acescentral.com/specifications/acescg/
+/// [aceswp]: https://docs.acescentral.com/tb/white-point
+#[derive(Clone, Copy, Debug)]
+pub struct AcesCg;
+
+impl ColorSpace for AcesCg {
+    const IS_LINEAR: bool = true;
+
+    const TAG: Option<ColorSpaceTag> = Some(ColorSpaceTag::AcesCg);
+
+    const WHITE_COMPONENTS: [f32; 3] = [1.0, 1.0, 1.0];
+
+    fn to_linear_srgb(src: [f32; 3]) -> [f32; 3] {
+        // XYZ_to_lin_sRGB * ACESwp_to_D65 * ACEScg_to_XYZ
+        const ACESCG_TO_LINEAR_SRGB: [[f32; 3]; 3] = [
+            [1.705_051, -0.621_792_14, -0.083_258_875],
+            [-0.130_256_41, 1.140_804_8, -0.010_548_319],
+            [-0.024_003_357, -0.128_968_97, 1.152_972_3],
+        ];
+        matmul(&ACESCG_TO_LINEAR_SRGB, src)
+    }
+
+    fn from_linear_srgb(src: [f32; 3]) -> [f32; 3] {
+        // XYZ_to_ACEScg * D65_to_ACESwp * lin_sRGB_to_XYZ
+        const LINEAR_SRGB_TO_ACESCG: [[f32; 3]; 3] = [
+            [0.613_097_4, 0.339_523_14, 0.047_379_453],
+            [0.070_193_72, 0.916_353_9, 0.013_452_399],
+            [0.020_615_593, 0.109_569_77, 0.869_814_63],
+        ];
+        matmul(&LINEAR_SRGB_TO_ACESCG, src)
+    }
+
+    fn clip([r, g, b]: [f32; 3]) -> [f32; 3] {
+        [
+            r.clamp(-65504., 65504.),
+            g.clamp(-65504., 65504.),
+            b.clamp(-65504., 65504.),
+        ]
+    }
+}
+
 /// 🌌 The CIE XYZ color space with a 2° observer and a reference white of D50.
 ///
 /// Its components are `[X, Y, Z]`. The components are unbounded, but are usually positive.
@@ -1171,8 +1229,8 @@ impl ColorSpace for Hwb {
 #[cfg(test)]
 mod tests {
     use crate::{
-        A98Rgb, ColorSpace, DisplayP3, Hsl, Hwb, Lab, Lch, LinearSrgb, Oklab, Oklch, OpaqueColor,
-        ProphotoRgb, Rec2020, Srgb, XyzD50, XyzD65,
+        A98Rgb, AcesCg, ColorSpace, DisplayP3, Hsl, Hwb, Lab, Lch, LinearSrgb, Oklab, Oklch,
+        OpaqueColor, ProphotoRgb, Rec2020, Srgb, XyzD50, XyzD65,
     };
 
     #[must_use]
@@ -1204,6 +1262,7 @@ mod tests {
         check_white::<Oklch>();
         check_white::<ProphotoRgb>();
         check_white::<Rec2020>();
+        check_white::<AcesCg>();
         check_white::<XyzD50>();
         check_white::<XyzD65>();
     }

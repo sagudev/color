@@ -105,8 +105,8 @@ mod floatfuncs;
 
 pub use color::{AlphaColor, HueDirection, OpaqueColor, PremulColor};
 pub use colorspace::{
-    A98Rgb, ColorSpace, ColorSpaceLayout, DisplayP3, Hsl, Hwb, Lab, Lch, LinearSrgb, Oklab, Oklch,
-    ProphotoRgb, Rec2020, Srgb, XyzD50, XyzD65,
+    A98Rgb, AcesCg, ColorSpace, ColorSpaceLayout, DisplayP3, Hsl, Hwb, Lab, Lch, LinearSrgb, Oklab,
+    Oklch, ProphotoRgb, Rec2020, Srgb, XyzD50, XyzD65,
 };
 pub use dynamic::{DynamicColor, Interpolator};
 pub use gradient::{gradient, GradientIter};
