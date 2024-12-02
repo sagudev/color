@@ -248,7 +248,7 @@ impl<CS: ColorSpace> OpaqueColor<CS> {
     ///
     /// In a color space that naturally has a lightness component, map that value.
     /// Otherwise, do the mapping in [Oklab]. The lightness range is normalized so
-    /// that 1.0 is white. That is the normal range for Oklab but differs from the
+    /// that 1.0 is white. That is the normal range for [Oklab] but differs from the
     /// range in [Lab], [Lch], and [Hsl].
     ///
     /// # Examples
@@ -260,7 +260,7 @@ impl<CS: ColorSpace> OpaqueColor<CS> {
     /// let lighter = color.map_lightness(|l| l + 0.2);
     /// let expected = OpaqueColor::<Lab>::new([60., 4., -17.]);
     ///
-    /// assert!(lighter.difference(expected) < 0.001);
+    /// assert!(lighter.difference(expected) < 1e-4);
     /// ```
     ///
     /// [Lab]: crate::Lab
@@ -294,7 +294,7 @@ impl<CS: ColorSpace> OpaqueColor<CS> {
     /// let complementary = color.map_hue(|h| (h + 180.) % 360.);
     /// let expected = OpaqueColor::<Oklab>::new([0.5, -0.2, 0.1]);
     ///
-    /// assert!(complementary.difference(expected) < 0.001);
+    /// assert!(complementary.difference(expected) < 1e-4);
     /// ```
     #[must_use]
     pub fn map_hue(self, f: impl Fn(f32) -> f32) -> Self {
@@ -452,6 +452,18 @@ impl<CS: ColorSpace> AlphaColor<CS> {
     /// that 1.0 is white. That is the normal range for [Oklab] but differs from the
     /// range in [Lab], [Lch], and [Hsl].
     ///
+    /// # Examples
+    ///
+    /// ```rust
+    /// use color::{AlphaColor, Lab};
+    ///
+    /// let color = AlphaColor::<Lab>::new([40., 4., -17., 1.]);
+    /// let lighter = color.map_lightness(|l| l + 0.2);
+    /// let expected = AlphaColor::<Lab>::new([60., 4., -17., 1.]);
+    ///
+    /// assert!(lighter.premultiply().difference(expected.premultiply()) < 1e-4);
+    /// ```
+    ///
     /// [Lab]: crate::Lab
     /// [Lch]: crate::Lch
     /// [Hsl]: crate::Hsl
@@ -473,6 +485,18 @@ impl<CS: ColorSpace> AlphaColor<CS> {
     ///
     /// In a color space that naturally has a hue component, map that value.
     /// Otherwise, do the mapping in [Oklch]. The hue is in degrees.
+    ///
+    /// # Examples
+    ///
+    /// ```rust
+    /// use color::{AlphaColor, Oklab};
+    ///
+    /// let color = AlphaColor::<Oklab>::new([0.5, 0.2, -0.1, 1.]);
+    /// let complementary = color.map_hue(|h| (h + 180.) % 360.);
+    /// let expected = AlphaColor::<Oklab>::new([0.5, -0.2, 0.1, 1.]);
+    ///
+    /// assert!(complementary.premultiply().difference(expected.premultiply()) < 1e-4);
+    /// ```
     #[must_use]
     pub fn map_hue(self, f: impl Fn(f32) -> f32) -> Self {
         match CS::LAYOUT {
