@@ -13,7 +13,7 @@ fn write_scaled_component(
     f: &mut Formatter<'_>,
     scale: f32,
 ) -> Result {
-    if color.missing.contains(ix) {
+    if color.flags.missing().contains(ix) {
         // According to the serialization rules (§15.2), missing should be converted to 0.
         // However, it seems useful to preserve these. Perhaps we want to talk about whether
         // we want string formatting to strictly follow the serialization spec.
@@ -77,9 +77,18 @@ fn write_legacy_function(
 
 impl core::fmt::Display for DynamicColor {
     fn fmt(&self, f: &mut Formatter<'_>) -> Result {
+        if let Some(color_name) = self.flags.color_name() {
+            return write!(f, "{}", color_name);
+        }
+
         match self.cs {
-            // A case can be made this isn't the best serialization in general,
-            // because CSS parsing of out-of-gamut components will clamp.
+            ColorSpaceTag::Srgb if self.flags.named() => {
+                write_legacy_function(self, "rgb", 255.0, f)
+            }
+            ColorSpaceTag::Hsl | ColorSpaceTag::Hwb if self.flags.named() => {
+                let srgb = self.convert(ColorSpaceTag::Srgb);
+                write_legacy_function(&srgb, "rgb", 255.0, f)
+            }
             ColorSpaceTag::Srgb => write_color_function(self, "srgb", f),
             ColorSpaceTag::LinearSrgb => write_color_function(self, "srgb-linear", f),
             ColorSpaceTag::DisplayP3 => write_color_function(self, "display-p3", f),
@@ -140,7 +149,7 @@ impl core::fmt::UpperHex for Rgba8 {
 
 #[cfg(test)]
 mod tests {
-    use crate::{parse_color, Srgb};
+    use crate::{parse_color, AlphaColor, DynamicColor, Hsl, Oklab, Srgb};
 
     #[test]
     fn rgb8() {
@@ -150,5 +159,89 @@ mod tests {
         let c_alpha = c.with_alpha(1. / 3.);
         assert_eq!(format!("{:x}", c_alpha.to_rgba8()), "#abcdef55");
         assert_eq!(format!("{:X}", c_alpha.to_rgba8()), "#ABCDEF55");
+    }
+
+    #[test]
+    fn specified_to_serialized() {
+        for (specified, expected) in [
+            ("#ff0000", "rgb(255, 0, 0)"),
+            ("rgb(255,0,0)", "rgb(255, 0, 0)"),
+            ("rgba(255,0,0,50%)", "rgba(255, 0, 0, 0.5)"),
+            ("rgb(255 0 0 / 95%)", "rgba(255, 0, 0, 0.95)"),
+            // TODO: output rounding? Otherwise the tests should check for approximate equality
+            // (and not string equality) for these conversion cases
+            // (
+            //     "hwb(740deg 20% 30% / 50%)",
+            //     "rgba(178.5, 93.50008, 50.999996, 0.5)",
+            // ),
+            // the next two currently fail, but should succeed (ASCII uppercase codepoints should
+            // be lowercased)
+            // ("ReD", "red"),
+            // ("RgB(1,1,1)", "rgb(1, 1, 1)"),
+            ("rgb(257,-2,50)", "rgb(255, 0, 50)"),
+            ("color(srgb 1.0 1.0 1.0)", "color(srgb 1 1 1)"),
+            ("oklab(0.4 0.2 -0.2)", "oklab(0.4 0.2 -0.2)"),
+            ("lab(20% 0 60)", "lab(20 0 60)"),
+        ] {
+            let result = format!("{}", parse_color(specified).unwrap());
+            assert_eq!(
+                result,
+                expected,
+                "Failed serializing specified color `{specified}`. Expected: `{expected}`. Got: `{result}`."
+            );
+        }
+
+        // TODO: this can be removed when the "output rounding" TODO above is resolved. Here we
+        // just check the prefix is as expected.
+        for (specified, expected_prefix) in [
+            ("hwb(740deg 20% 30%)", "rgb("),
+            ("hwb(740deg 20% 30% / 50%)", "rgba("),
+            ("hsl(120deg 50% 25%)", "rgb("),
+            ("hsla(0.4turn 50% 25% / 50%)", "rgba("),
+        ] {
+            let result = format!("{}", parse_color(specified).unwrap());
+            assert!(
+                result.starts_with(expected_prefix),
+                "Failed serializing specified color `{specified}`. Expected the serialization to start with: `{expected_prefix}`. Got: `{result}`."
+            );
+        }
+    }
+
+    #[test]
+    fn generated_to_serialized() {
+        for (color, expected) in [
+            (
+                DynamicColor::from_alpha_color(AlphaColor::<Srgb>::new([0.5, 0.2, 1.1, 0.5])),
+                "color(srgb 0.5 0.2 1.1 / 0.5)",
+            ),
+            (
+                DynamicColor::from_alpha_color(AlphaColor::<Oklab>::new([0.4, 0.2, -0.2, 1.])),
+                "oklab(0.4 0.2 -0.2)",
+            ),
+            // Perhaps this should actually serialize to `rgb(...)`.
+            (
+                DynamicColor::from_alpha_color(AlphaColor::<Hsl>::new([120., 50., 25., 1.])),
+                "hsl(120, 50, 25)",
+            ),
+        ] {
+            let result = format!("{}", color);
+            assert_eq!(
+                result,
+                expected,
+                "Failed serializing specified color `{color}`. Expected: `{expected}`. Got: `{result}`."
+            );
+        }
+    }
+
+    #[test]
+    fn roundtrip_named_colors() {
+        for name in crate::x11_colors::NAMES {
+            let result = format!("{}", parse_color(name).unwrap());
+            assert_eq!(
+                result,
+                name,
+                "Failed serializing specified named color `{name}`. Expected it to roundtrip. Got: `{result}`."
+            );
+        }
     }
 }
