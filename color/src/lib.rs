@@ -84,18 +84,21 @@
 #![cfg_attr(docsrs, feature(doc_auto_cfg))]
 #![cfg_attr(all(not(feature = "std"), not(test)), no_std)]
 
+pub mod cache_key;
 mod color;
 mod colorspace;
+mod dynamic;
 mod flags;
 mod gradient;
-// Note: this may become feature-gated; we'll decide this soon
-mod dynamic;
 pub mod palette;
-mod parse;
 mod rgba8;
 mod serialize;
 mod tag;
 mod x11_colors;
+
+// Note: this may become feature-gated; we'll decide this soon
+// (This line is isolated so that the comment binds to it with import ordering)
+mod parse;
 
 #[cfg(feature = "bytemuck")]
 mod impl_bytemuck;
