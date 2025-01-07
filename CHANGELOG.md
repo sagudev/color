@@ -15,6 +15,10 @@ You can find its changes [documented below](#022-2025-01-03).
 
 This release has an [MSRV][] of 1.82.
 
+### Added
+
+* Support for the ACES2065-1 color space. ([#124][] by [@tomcur][])
+
 ## [0.2.2][] (2025-01-03)
 
 This release has an [MSRV][] of 1.82.
@@ -106,6 +110,7 @@ This is the initial release.
 [#113]: https://github.com/linebender/color/pull/113
 [#118]: https://github.com/linebender/color/pull/118
 [#119]: https://github.com/linebender/color/pull/119
+[#124]: https://github.com/linebender/color/pull/124
 
 [Unreleased]: https://github.com/linebender/color/compare/v0.2.1...HEAD
 [0.2.1]: https://github.com/linebender/color/releases/tag/v0.2.1
