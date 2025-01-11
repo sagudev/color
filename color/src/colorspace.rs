@@ -24,6 +24,51 @@ use crate::floatfuncs::FloatFuncs;
 ///
 /// See the [XYZ-D65 color space](`XyzD65`) documentation for some
 /// background information on color spaces.
+///
+/// # Implementing `ColorSpace`
+///
+/// When implementing a custom color space, take care to set the associated constants correctly.
+/// The following is an example implementation of the
+/// [Rec. 709](https://www.color.org/chardata/rgb/BT2020.xalter) color space.
+///
+/// **Note:**
+/// - [`ColorSpace::convert`] can be implemented to specialize specific conversions;
+/// - implement [`ColorSpace::scale_chroma`] if your color space has a natural representation of
+///   chroma.
+///
+/// ```rust
+/// use color::{ColorSpace, ColorSpaceLayout};
+///
+/// /// The Rec. 709 color space, using the electro-optical transfer function
+/// /// defined in ITU-R BT.1886.
+/// ///
+/// /// Rec. 709 is very similar to sRGB, having the same natural gamut, but
+/// /// does have a different transfer function.
+/// ///
+/// /// See https://www.color.org/chardata/rgb/BT709.xalter.
+/// #[derive(Clone, Copy, Debug)]
+/// pub struct Rec709;
+///
+/// impl ColorSpace for Rec709 {
+///     const IS_LINEAR: bool = false;
+///
+///     const LAYOUT: ColorSpaceLayout = ColorSpaceLayout::Rectangular;
+///
+///     const WHITE_COMPONENTS: [f32; 3] = [1., 1., 1.];
+///
+///     fn to_linear_srgb(src: [f32; 3]) -> [f32; 3] {
+///         src.map(|x| x.powf(2.4))
+///     }
+///
+///     fn from_linear_srgb(src: [f32; 3]) -> [f32; 3] {
+///         src.map(|x| x.powf(1. / 2.4))
+///     }
+///
+///     fn clip([r, g, b]: [f32; 3]) -> [f32; 3] {
+///         [r.clamp(0., 1.), g.clamp(0., 1.), b.clamp(0., 1.)]
+///     }
+/// }
+/// ```
 pub trait ColorSpace: Clone + Copy + 'static {
     /// Whether the color space is linear.
     ///
