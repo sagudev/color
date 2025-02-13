@@ -6,8 +6,8 @@
 use crate::{
     cache_key::{BitEq, BitHash},
     color::{add_alpha, fixup_hues_for_interpolate, split_alpha},
-    AlphaColor, ColorSpace, ColorSpaceLayout, ColorSpaceTag, Flags, HueDirection, LinearSrgb,
-    Missing,
+    AlphaColor, Chromaticity, ColorSpace, ColorSpaceLayout, ColorSpaceTag, Flags, HueDirection,
+    LinearSrgb, Missing,
 };
 use core::hash::{Hash, Hasher};
 
@@ -89,9 +89,9 @@ impl DynamicColor {
         }
     }
 
-    #[must_use]
-    /// Convert to a different color space.
-    pub fn convert(self, cs: ColorSpaceTag) -> Self {
+    /// The const-generic parameter `ABSOLUTE` indicates whether the conversion performs chromatic
+    /// adaptation. When `ABSOLUTE` is `true`, no chromatic adaptation is performed.
+    fn convert_impl<const ABSOLUTE: bool>(self, cs: ColorSpaceTag) -> Self {
         if self.cs == cs {
             // Note: §12 suggests that changing powerless to missing happens
             // even when the color is already in the interpolation color space,
@@ -99,7 +99,11 @@ impl DynamicColor {
             self
         } else {
             let (opaque, alpha) = split_alpha(self.components);
-            let mut components = add_alpha(self.cs.convert(cs, opaque), alpha);
+            let mut components = if ABSOLUTE {
+                add_alpha(self.cs.convert_absolute(cs, opaque), alpha)
+            } else {
+                add_alpha(self.cs.convert(cs, opaque), alpha)
+            };
             // Reference: §12.2 of Color 4 spec
             let missing = if !self.flags.missing().is_empty() {
                 if self.cs.same_analogous(cs) {
@@ -132,6 +136,45 @@ impl DynamicColor {
             };
             result.powerless_to_missing();
             result
+        }
+    }
+
+    #[must_use]
+    /// Convert to a different color space.
+    pub fn convert(self, cs: ColorSpaceTag) -> Self {
+        self.convert_impl::<false>(cs)
+    }
+
+    #[must_use]
+    /// Convert to a different color space, without chromatic adaptation.
+    ///
+    /// For most use-cases you should consider using the chromatically-adapting
+    /// [`DynamicColor::convert`] instead. See the documentation on
+    /// [`ColorSpace::convert_absolute`] for more information.
+    pub fn convert_absolute(self, cs: ColorSpaceTag) -> Self {
+        self.convert_impl::<true>(cs)
+    }
+
+    #[must_use]
+    /// Chromatically adapt the color between the given white point chromaticities.
+    ///
+    /// The color is assumed to be under a reference white point of `from` and is chromatically
+    /// adapted to the given white point `to`. The linear Bradford transform is used to perform the
+    /// chromatic adaptation.
+    pub fn chromatically_adapt(self, from: Chromaticity, to: Chromaticity) -> Self {
+        if from == to {
+            return self;
+        }
+
+        // Treat missing components as zero, as per CSS Color Module Level 4 § 4.4.
+        let (opaque, alpha) = split_alpha(self.zero_missing_components().components);
+        let components = add_alpha(self.cs.chromatically_adapt(opaque, from, to), alpha);
+        Self {
+            cs: self.cs,
+            // After chromatically adapting the color, components may no longer be missing. Don't
+            // forward the flags.
+            flags: Flags::default(),
+            components,
         }
     }
 

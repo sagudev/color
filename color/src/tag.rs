@@ -4,8 +4,8 @@
 //! The color space tag enum.
 
 use crate::{
-    A98Rgb, Aces2065_1, AcesCg, ColorSpace, ColorSpaceLayout, DisplayP3, Hsl, Hwb, Lab, Lch,
-    LinearSrgb, Missing, Oklab, Oklch, ProphotoRgb, Rec2020, Srgb, XyzD50, XyzD65,
+    A98Rgb, Aces2065_1, AcesCg, Chromaticity, ColorSpace, ColorSpaceLayout, DisplayP3, Hsl, Hwb,
+    Lab, Lch, LinearSrgb, Missing, Oklab, Oklch, ProphotoRgb, Rec2020, Srgb, XyzD50, XyzD65,
 };
 
 /// The color space tag for [dynamic colors].
@@ -218,6 +218,119 @@ impl ColorSpaceTag {
             (Self::Hsl, Self::Hwb) => Hsl::convert::<Hwb>(src),
             (Self::Hwb, Self::Hsl) => Hwb::convert::<Hsl>(src),
             _ => target.from_linear_srgb(self.to_linear_srgb(src)),
+        }
+    }
+
+    /// Convert an opaque color from linear sRGB, without chromatic adaptation.
+    ///
+    /// For most use-cases you should consider using the chromatically-adapting
+    /// [`ColorSpaceTag::from_linear_srgb`] instead.
+    ///
+    /// This is the tagged counterpart of [`ColorSpace::from_linear_srgb_absolute`].
+    pub fn from_linear_srgb_absolute(self, rgb: [f32; 3]) -> [f32; 3] {
+        match self {
+            Self::Srgb => Srgb::from_linear_srgb_absolute(rgb),
+            Self::LinearSrgb => rgb,
+            Self::Lab => Lab::from_linear_srgb_absolute(rgb),
+            Self::Lch => Lch::from_linear_srgb_absolute(rgb),
+            Self::Oklab => Oklab::from_linear_srgb_absolute(rgb),
+            Self::Oklch => Oklch::from_linear_srgb_absolute(rgb),
+            Self::DisplayP3 => DisplayP3::from_linear_srgb_absolute(rgb),
+            Self::A98Rgb => A98Rgb::from_linear_srgb_absolute(rgb),
+            Self::ProphotoRgb => ProphotoRgb::from_linear_srgb_absolute(rgb),
+            Self::Rec2020 => Rec2020::from_linear_srgb_absolute(rgb),
+            Self::Aces2065_1 => Aces2065_1::from_linear_srgb_absolute(rgb),
+            Self::AcesCg => AcesCg::from_linear_srgb_absolute(rgb),
+            Self::XyzD50 => XyzD50::from_linear_srgb_absolute(rgb),
+            Self::XyzD65 => XyzD65::from_linear_srgb_absolute(rgb),
+            Self::Hsl => Hsl::from_linear_srgb_absolute(rgb),
+            Self::Hwb => Hwb::from_linear_srgb_absolute(rgb),
+        }
+    }
+
+    /// Convert an opaque color to linear sRGB, without chromatic adaptation.
+    ///
+    /// For most use-cases you should consider using the chromatically-adapting
+    /// [`ColorSpaceTag::to_linear_srgb`] instead.
+    ///
+    /// This is the tagged counterpart of [`ColorSpace::to_linear_srgb_absolute`].
+    pub fn to_linear_srgb_absolute(self, src: [f32; 3]) -> [f32; 3] {
+        match self {
+            Self::Srgb => Srgb::to_linear_srgb_absolute(src),
+            Self::LinearSrgb => src,
+            Self::Lab => Lab::to_linear_srgb_absolute(src),
+            Self::Lch => Lch::to_linear_srgb_absolute(src),
+            Self::Oklab => Oklab::to_linear_srgb_absolute(src),
+            Self::Oklch => Oklch::to_linear_srgb_absolute(src),
+            Self::DisplayP3 => DisplayP3::to_linear_srgb_absolute(src),
+            Self::A98Rgb => A98Rgb::to_linear_srgb_absolute(src),
+            Self::ProphotoRgb => ProphotoRgb::to_linear_srgb_absolute(src),
+            Self::Rec2020 => Rec2020::to_linear_srgb_absolute(src),
+            Self::Aces2065_1 => Aces2065_1::to_linear_srgb_absolute(src),
+            Self::AcesCg => AcesCg::to_linear_srgb_absolute(src),
+            Self::XyzD50 => XyzD50::to_linear_srgb_absolute(src),
+            Self::XyzD65 => XyzD65::to_linear_srgb_absolute(src),
+            Self::Hsl => Hsl::to_linear_srgb_absolute(src),
+            Self::Hwb => Hwb::to_linear_srgb_absolute(src),
+        }
+    }
+
+    /// Convert the color components into the target color space, without chromatic adaptation.
+    ///
+    /// For most use-cases you should consider using the chromatically-adapting
+    /// [`ColorSpaceTag::convert`] instead.
+    ///
+    /// This is the tagged counterpart of [`ColorSpace::convert_absolute`]. See the documentation
+    /// on [`ColorSpace::convert_absolute`] for more information.
+    pub fn convert_absolute(self, target: Self, src: [f32; 3]) -> [f32; 3] {
+        match (self, target) {
+            _ if self == target => src,
+            (Self::Oklab, Self::Oklch) | (Self::Lab, Self::Lch) => {
+                Oklab::convert_absolute::<Oklch>(src)
+            }
+            (Self::Oklch, Self::Oklab) | (Self::Lch, Self::Lab) => {
+                Oklch::convert_absolute::<Oklab>(src)
+            }
+            (Self::Srgb, Self::Hsl) => Srgb::convert_absolute::<Hsl>(src),
+            (Self::Hsl, Self::Srgb) => Hsl::convert_absolute::<Srgb>(src),
+            (Self::Srgb, Self::Hwb) => Srgb::convert_absolute::<Hwb>(src),
+            (Self::Hwb, Self::Srgb) => Hwb::convert_absolute::<Srgb>(src),
+            (Self::Hsl, Self::Hwb) => Hsl::convert_absolute::<Hwb>(src),
+            (Self::Hwb, Self::Hsl) => Hwb::convert_absolute::<Hsl>(src),
+            _ => target.from_linear_srgb_absolute(self.to_linear_srgb_absolute(src)),
+        }
+    }
+
+    /// Chromatically adapt the color between the given white point chromaticities.
+    ///
+    /// This is the tagged counterpart of [`ColorSpace::chromatically_adapt`].
+    ///
+    /// The color is assumed to be under a reference white point of `from` and is chromatically
+    /// adapted to the given white point `to`. The linear Bradford transform is used to perform the
+    /// chromatic adaptation.
+    pub fn chromatically_adapt(
+        self,
+        src: [f32; 3],
+        from: Chromaticity,
+        to: Chromaticity,
+    ) -> [f32; 3] {
+        match self {
+            Self::Srgb => Srgb::chromatically_adapt(src, from, to),
+            Self::LinearSrgb => LinearSrgb::chromatically_adapt(src, from, to),
+            Self::Lab => Lab::chromatically_adapt(src, from, to),
+            Self::Lch => Lch::chromatically_adapt(src, from, to),
+            Self::Oklab => Oklab::chromatically_adapt(src, from, to),
+            Self::Oklch => Oklch::chromatically_adapt(src, from, to),
+            Self::DisplayP3 => DisplayP3::chromatically_adapt(src, from, to),
+            Self::A98Rgb => A98Rgb::chromatically_adapt(src, from, to),
+            Self::ProphotoRgb => ProphotoRgb::chromatically_adapt(src, from, to),
+            Self::Rec2020 => Rec2020::chromatically_adapt(src, from, to),
+            Self::Aces2065_1 => Aces2065_1::chromatically_adapt(src, from, to),
+            Self::AcesCg => AcesCg::chromatically_adapt(src, from, to),
+            Self::XyzD50 => XyzD50::chromatically_adapt(src, from, to),
+            Self::XyzD65 => XyzD65::chromatically_adapt(src, from, to),
+            Self::Hsl => Hsl::chromatically_adapt(src, from, to),
+            Self::Hwb => Hwb::chromatically_adapt(src, from, to),
         }
     }
 
