@@ -468,6 +468,25 @@ impl BitHash for DynamicColor {
     }
 }
 
+/// Note that the conversion is only lossless for color spaces that have a corresponding [tag](ColorSpaceTag).
+/// This is why we have this additional trait bound. See also
+/// <https://github.com/linebender/color/pull/155> for more discussion.
+impl<CS: ColorSpace> From<AlphaColor<CS>> for DynamicColor
+where
+    ColorSpaceTag: From<CS>,
+{
+    fn from(value: AlphaColor<CS>) -> Self {
+        const {
+            assert!(
+                CS::TAG.is_some(),
+                "this trait can only be implemented for colors with a tag"
+            );
+        }
+
+        Self::from_alpha_color(value)
+    }
+}
+
 impl Interpolator {
     /// Evaluate the color ramp at the given point.
     ///
