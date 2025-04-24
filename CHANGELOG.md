@@ -24,6 +24,10 @@ This release has an [MSRV][] of 1.82.
 * Support manual chromatic adaptation of colors between arbitrary white point chromaticities.  ([#139][] by [@tomcur][])
 * Add `Missing::EMPTY` to allow getting an empty `Missing` set in `const` contexts. ([#149][] by [@tomcur][])
 
+### Changed
+
+* Breaking change: the deprecated conversion `From<Rgba8> for PremulColor<Srgb>` has been removed. Use `From<PremulRgba8> for PremulColor<Srgb>` instead. ([#157][] by [@tomcur][])
+
 ### Fixed
 
 * Correctly determine analogous components between ACES2065-1 and other color spaces when converting, to carry missing components forward. ([#144][] by [@tomcur][])
@@ -145,6 +149,7 @@ This is the initial release.
 [#144]: https://github.com/linebender/color/pull/144
 [#145]: https://github.com/linebender/color/pull/145
 [#149]: https://github.com/linebender/color/pull/149
+[#157]: https://github.com/linebender/color/pull/157
 
 [Unreleased]: https://github.com/linebender/color/compare/v0.2.3...HEAD
 [0.2.3]: https://github.com/linebender/color/releases/tag/v0.2.3
