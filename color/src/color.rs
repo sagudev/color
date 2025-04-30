@@ -311,7 +311,16 @@ impl<CS: ColorSpace> OpaqueColor<CS> {
         }
     }
 
-    /// Pack into 8 bit per component encoding.
+    /// Convert the color to [sRGB][Srgb] if not already in sRGB, and pack into 8 bit per component
+    /// integer encoding.
+    ///
+    /// The RGB components are mapped from the floating point range of `0.0-1.0` to the integer
+    /// range of `0-255`. Component values outside of this range are saturated to 0 or 255. The
+    /// alpha component is set to 255.
+    ///
+    /// # Implementation note
+    ///
+    /// This performs almost-correct rounding, see the note on [`AlphaColor::to_rgba8`].
     #[must_use]
     pub fn to_rgba8(self) -> Rgba8 {
         self.with_alpha(1.0).to_rgba8()
@@ -512,16 +521,24 @@ impl<CS: ColorSpace> AlphaColor<CS> {
         }
     }
 
-    /// Pack into 8 bit per component encoding.
+    /// Convert the color to [sRGB][Srgb] if not already in sRGB, and pack into 8 bit per component
+    /// integer encoding.
+    ///
+    /// The RGBA components are mapped from the floating point range of `0.0-1.0` to the integer
+    /// range of `0-255`. Component values outside of this range are saturated to 0 or 255.
+    ///
+    /// # Implementation note
+    ///
+    /// This performs almost-correct rounding to be fast on both x86 and AArch64 hardware. Within the
+    /// saturated output range of this method, `0-255`, there is a single color component value
+    /// where results differ: `0.0019607842`. This method maps that component to integer value `1`;
+    /// it would more precisely be mapped to `0`.
     #[must_use]
     pub fn to_rgba8(self) -> Rgba8 {
-        // This does not need clamping as the behavior of a `f32` to `u8`
-        // cast in Rust is to saturate.
-        #[expect(clippy::cast_possible_truncation, reason = "deliberate quantization")]
         let [r, g, b, a] = self
             .convert::<Srgb>()
             .components
-            .map(|x| (x * 255.0).round() as u8);
+            .map(|x| fast_round_to_u8(x * 255.));
         Rgba8 { r, g, b, a }
     }
 }
@@ -630,18 +647,38 @@ impl<CS: ColorSpace> PremulColor<CS> {
         (d[0] * d[0] + d[1] * d[1] + d[2] * d[2] + d[3] * d[3]).sqrt()
     }
 
-    /// Pack into 8 bit per component encoding.
+    /// Convert the color to [sRGB][Srgb] if not already in sRGB, and pack into 8 bit per component
+    /// integer encoding.
+    ///
+    /// The RGBA components are mapped from the floating point range of `0.0-1.0` to the integer
+    /// range of `0-255`. Component values outside of this range are saturated to 0 or 255.
+    ///
+    /// # Implementation note
+    ///
+    /// This performs almost-correct rounding, see the note on [`AlphaColor::to_rgba8`].
     #[must_use]
     pub fn to_rgba8(self) -> PremulRgba8 {
-        // This does not need clamping as the behavior of a `f32` to `u8`
-        // cast in Rust is to saturate.
-        #[expect(clippy::cast_possible_truncation, reason = "deliberate quantization")]
         let [r, g, b, a] = self
             .convert::<Srgb>()
             .components
-            .map(|x| (x * 255.0).round() as u8);
+            .map(|x| fast_round_to_u8(x * 255.));
         PremulRgba8 { r, g, b, a }
     }
+}
+
+/// Fast rounding of `f32` to integer `u8`, rounding ties up.
+///
+/// Targeting x86, `f32::round` calls out to libc `roundf`. Even if that call were inlined, it is
+/// branchy, which would make it relatively slow. The following is faster, and on the range `0-255`
+/// almost correct*. AArch64 has dedicated rounding instructions so does not need this
+/// optimization, but the following is still fast.
+///
+/// * The only input where the output differs from `a.round() as u8` is `0.49999997`.
+#[inline(always)]
+#[expect(clippy::cast_possible_truncation, reason = "deliberate quantization")]
+fn fast_round_to_u8(a: f32) -> u8 {
+    // This does not need clamping as the behavior of a `f32` to `u8` cast in Rust is to saturate.
+    (a + 0.5) as u8
 }
 
 // Lossless conversion traits.
@@ -871,7 +908,12 @@ impl<CS> BitHash for PremulColor<CS> {
 
 #[cfg(test)]
 mod tests {
-    use super::{fixup_hue, AlphaColor, HueDirection, PremulColor, PremulRgba8, Rgba8, Srgb};
+    extern crate alloc;
+
+    use super::{
+        fast_round_to_u8, fixup_hue, AlphaColor, HueDirection, PremulColor, PremulRgba8, Rgba8,
+        Srgb,
+    };
 
     #[test]
     fn to_rgba8_saturation() {
@@ -938,5 +980,69 @@ mod tests {
                 }
             }
         }
+    }
+
+    /// Test the claim in [`super::real_round_to_u8`] that the only rounding failure in the range
+    /// of interest occurs for `0.49999997`.
+    #[test]
+    fn fast_round() {
+        #[expect(clippy::cast_possible_truncation, reason = "deliberate quantization")]
+        fn real_round_to_u8(v: f32) -> u8 {
+            v.round() as u8
+        }
+
+        // Check the rounding behavior at integer and half integer values within (and near) the
+        // range 0-255, as well as one ULP up and down from those values.
+        let mut failures = alloc::vec![];
+        let mut v = -1_f32;
+
+        while v <= 256. {
+            // Note we don't get accumulation of rounding errors by incrementing with 0.5: integers
+            // and half integers are exactly representable in this range.
+            assert!(v.abs().fract() == 0. || v.abs().fract() == 0.5, "{v}");
+
+            let mut validate_rounding = |val: f32| {
+                if real_round_to_u8(val) != fast_round_to_u8(val) {
+                    failures.push(val);
+                }
+            };
+
+            validate_rounding(v.next_down().next_down());
+            validate_rounding(v.next_down());
+            validate_rounding(v);
+            validate_rounding(v.next_up());
+            validate_rounding(v.next_up().next_up());
+
+            v += 0.5;
+        }
+
+        assert_eq!(&failures, &[0.49999997]);
+    }
+
+    /// A more thorough test than the one above: the one above only tests values that are likely to
+    /// fail. This test runs through all floats in and near the range of interest (approximately
+    /// 200 million floats), so can be somewhat slow (seconds rather than milliseconds). To run
+    /// this test, use the `--ignored` flag.
+    #[test]
+    #[ignore = "Takes too long to execute."]
+    fn fast_round_full() {
+        #[expect(clippy::cast_possible_truncation, reason = "deliberate quantization")]
+        fn real_round_to_u8(v: f32) -> u8 {
+            v.round() as u8
+        }
+
+        // Check the rounding behavior of all floating point values within (and near) the range
+        // 0-255.
+        let mut failures = alloc::vec![];
+        let mut v = -1_f32;
+
+        while v <= 256. {
+            if real_round_to_u8(v) != fast_round_to_u8(v) {
+                failures.push(v);
+            }
+            v = v.next_up();
+        }
+
+        assert_eq!(&failures, &[0.49999997]);
     }
 }
