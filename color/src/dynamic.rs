@@ -5,7 +5,7 @@
 
 use crate::{
     cache_key::{BitEq, BitHash},
-    color::{add_alpha, fixup_hues_for_interpolate, split_alpha},
+    color::{add_alpha, fixup_hues_for_interpolate, split_alpha, InterpolationAlphaSpace},
     AlphaColor, Chromaticity, ColorSpace, ColorSpaceLayout, ColorSpaceTag, Flags, HueDirection,
     LinearSrgb, Missing,
 };
@@ -54,9 +54,26 @@ pub struct DynamicColor {
     reason = "it's an intermediate struct, only used for eval"
 )]
 pub struct Interpolator {
-    premul1: [f32; 3],
+    color1: [f32; 3],
     alpha1: f32,
-    delta_premul: [f32; 3],
+    delta_color: [f32; 3],
+    delta_alpha: f32,
+    cs: ColorSpaceTag,
+    missing: Missing,
+}
+
+/// An intermediate struct used for interpolating between colors.
+///
+/// This is the return value of [`DynamicColor::interpolate_unpremultiplied`].
+#[derive(Clone, Copy)]
+#[expect(
+    missing_debug_implementations,
+    reason = "it's an intermediate struct, only used for eval"
+)]
+pub struct UnpremultipliedInterpolator {
+    color1: [f32; 3],
+    alpha1: f32,
+    delta_color: [f32; 3],
     delta_alpha: f32,
     cs: ColorSpaceTag,
     missing: Missing,
@@ -274,15 +291,18 @@ impl DynamicColor {
         }
     }
 
-    fn premultiply_split(self) -> ([f32; 3], f32) {
+    fn split(self, alpha_type: InterpolationAlphaSpace) -> ([f32; 3], f32) {
         // Reference: §12.3 of Color 4 spec
         let (opaque, alpha) = split_alpha(self.components);
-        let premul = if alpha == 1.0 || self.flags.missing().contains(3) {
+        let color = if alpha == 1.0
+            || self.flags.missing().contains(3)
+            || alpha_type.is_unpremultiplied()
+        {
             opaque
         } else {
             self.cs.layout().scale(opaque, alpha)
         };
-        (premul, alpha)
+        (color, alpha)
     }
 
     fn powerless_to_missing(&mut self) {
@@ -362,18 +382,96 @@ impl DynamicColor {
                 }
             }
         }
-        let (premul1, alpha1) = a.premultiply_split();
-        let (mut premul2, alpha2) = b.premultiply_split();
-        fixup_hues_for_interpolate(premul1, &mut premul2, cs.layout(), direction);
-        let delta_premul = [
-            premul2[0] - premul1[0],
-            premul2[1] - premul1[1],
-            premul2[2] - premul1[2],
+        let (color1, alpha1) = a.split(InterpolationAlphaSpace::Premultiplied);
+        let (mut color2, alpha2) = b.split(InterpolationAlphaSpace::Premultiplied);
+        fixup_hues_for_interpolate(color1, &mut color2, cs.layout(), direction);
+        let delta_color = [
+            color2[0] - color1[0],
+            color2[1] - color1[1],
+            color2[2] - color1[2],
         ];
         Interpolator {
-            premul1,
+            color1,
             alpha1,
-            delta_premul,
+            delta_color,
+            delta_alpha: alpha2 - alpha1,
+            cs,
+            missing,
+        }
+    }
+
+    /// Interpolate two colors without alpha premultiplication.
+    ///
+    /// Similar to [`DynamicColor::interpolate`], but colors are interpolated without premultiplying
+    /// their color channels by the alpha channel. This is almost never what you want.
+    ///
+    /// This causes color information to leak out of transparent colors. For example, when
+    /// interpolating from a fully transparent red to a fully opaque blue in sRGB, this
+    /// method will go through an intermediate purple.
+    ///
+    /// This matches behavior of gradients in the HTML `canvas` element.
+    /// See [The 2D rendering context § Fill and stroke styles][HTML 2D Canvas] of the
+    /// HTML 2D Canvas specification.
+    ///
+    /// [HTML 2D Canvas]: https://html.spec.whatwg.org/multipage/#interpolation
+    /// The colors are interpolated linearly from `self` to `other` in the color space given by
+    /// `cs`. When interpolating in a cylindrical color space, the hue can be interpolated in
+    /// multiple ways. The [`direction`](`HueDirection`) parameter controls the way in which the
+    /// hue is interpolated.
+    ///
+    /// The interpolation proceeds according to [CSS Color Module Level 4 § 12][css-sec].
+    ///
+    /// This method does a bunch of precomputation, resulting in an [`UnpremultipliedInterpolator`] object that
+    /// can be evaluated at various `t` values.
+    ///
+    /// [css-sec]: https://www.w3.org/TR/css-color-4/#interpolation
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// use color::{AlphaColor, ColorSpaceTag, DynamicColor, HueDirection, Srgb};
+    ///
+    /// let start = DynamicColor::from_alpha_color(AlphaColor::<Srgb>::new([1., 0., 0., 1.]));
+    /// let end = DynamicColor::from_alpha_color(AlphaColor::<Srgb>::new([0., 1., 0., 1.]));
+    ///
+    /// let interp = start.interpolate_unpremultiplied(end, ColorSpaceTag::Hsl, HueDirection::Increasing);
+    /// let mid = interp.eval(0.5);
+    /// assert_eq!(mid.cs, ColorSpaceTag::Hsl);
+    /// assert!((mid.components[0] - 60.).abs() < 0.01);
+    /// ```
+    pub fn interpolate_unpremultiplied(
+        self,
+        other: Self,
+        cs: ColorSpaceTag,
+        direction: HueDirection,
+    ) -> UnpremultipliedInterpolator {
+        let interpolation_alpha_space = InterpolationAlphaSpace::Unpremultiplied;
+        let mut a = self.convert(cs);
+        let mut b = other.convert(cs);
+        let a_missing = a.flags.missing();
+        let b_missing = b.flags.missing();
+        let missing = a_missing & b_missing;
+        if a_missing != b_missing {
+            for i in 0..4 {
+                if (a_missing & !b_missing).contains(i) {
+                    a.components[i] = b.components[i];
+                } else if (!a_missing & b_missing).contains(i) {
+                    b.components[i] = a.components[i];
+                }
+            }
+        }
+        let (color1, alpha1) = a.split(interpolation_alpha_space);
+        let (mut color2, alpha2) = b.split(interpolation_alpha_space);
+        fixup_hues_for_interpolate(color1, &mut color2, cs.layout(), direction);
+        let delta_color = [
+            color2[0] - color1[0],
+            color2[1] - color1[1],
+            color2[2] - color1[2],
+        ];
+        UnpremultipliedInterpolator {
+            color1,
+            alpha1,
+            delta_color,
             delta_alpha: alpha2 - alpha1,
             cs,
             missing,
@@ -509,18 +607,39 @@ impl Interpolator {
     /// Typically `t` ranges between 0 and 1, but that is not enforced,
     /// so extrapolation is also possible.
     pub fn eval(&self, t: f32) -> DynamicColor {
-        let premul = [
-            self.premul1[0] + t * self.delta_premul[0],
-            self.premul1[1] + t * self.delta_premul[1],
-            self.premul1[2] + t * self.delta_premul[2],
+        let color = [
+            self.color1[0] + t * self.delta_color[0],
+            self.color1[1] + t * self.delta_color[1],
+            self.color1[2] + t * self.delta_color[2],
         ];
         let alpha = self.alpha1 + t * self.delta_alpha;
         let opaque = if alpha == 0.0 || alpha == 1.0 {
-            premul
+            color
         } else {
-            self.cs.layout().scale(premul, 1.0 / alpha)
+            self.cs.layout().scale(color, 1.0 / alpha)
         };
         let components = add_alpha(opaque, alpha);
+        DynamicColor {
+            cs: self.cs,
+            flags: Flags::from_missing(self.missing),
+            components,
+        }
+    }
+}
+
+impl UnpremultipliedInterpolator {
+    /// Evaluate the color ramp at the given point.
+    ///
+    /// Typically `t` ranges between 0 and 1, but that is not enforced,
+    /// so extrapolation is also possible.
+    pub fn eval(&self, t: f32) -> DynamicColor {
+        let color = [
+            self.color1[0] + t * self.delta_color[0],
+            self.color1[1] + t * self.delta_color[1],
+            self.color1[2] + t * self.delta_color[2],
+        ];
+        let alpha = self.alpha1 + t * self.delta_alpha;
+        let components = add_alpha(color, alpha);
         DynamicColor {
             cs: self.cs,
             flags: Flags::from_missing(self.missing),
@@ -675,6 +794,25 @@ mod tests {
     }
 
     #[test]
+    fn unpremultiplied_rectangular_interpolation() {
+        use crate::HueDirection;
+
+        // This interpolates in a rectangular color space from a fully transparent color to a fully
+        // opaque color (with unpremultiplied color channels). Both colors should be contributing
+        // color information.
+        let start = parse_color("oklab(0.5 0.2 -0.1 / 0.0)").unwrap();
+        let end = parse_color("oklab(0.3 0.1 0.1 / 1.0)").unwrap();
+        let interp =
+            start.interpolate_unpremultiplied(end, ColorSpaceTag::Oklab, HueDirection::Increasing);
+        let mid = interp.eval(0.5);
+
+        assert!((mid.components[0] - 0.4).abs() < 1e-4);
+        assert!((mid.components[1] - 0.15).abs() < 1e-4);
+        assert!((mid.components[2] - 0.0).abs() < 1e-4);
+        assert!((mid.components[3] - 0.5).abs() < 1e-4);
+    }
+
+    #[test]
     fn premultiplied_cylindrical_interpolation() {
         use crate::HueDirection;
 
@@ -689,6 +827,25 @@ mod tests {
 
         assert!((mid.components[0] - 0.3).abs() < 1e-4);
         assert!((mid.components[1] - 0.1).abs() < 1e-4);
+        assert!((mid.components[2] - 150.).abs() < 1e-4);
+        assert!((mid.components[3] - 0.5).abs() < 1e-4);
+    }
+
+    #[test]
+    fn unpremultiplied_cylindrical_interpolation() {
+        use crate::HueDirection;
+
+        // This interpolates in a cylindrical color space from a fully transparent color to a fully
+        // opaque color (with unpremultiplied color channels). Both color should be contributing
+        // color information.
+        let start = parse_color("oklch(0.5 0.2 100 / 0.0)").unwrap();
+        let end = parse_color("oklch(0.3 0.1 200 / 1.0)").unwrap();
+        let interp =
+            start.interpolate_unpremultiplied(end, ColorSpaceTag::Oklch, HueDirection::Increasing);
+        let mid = interp.eval(0.5);
+
+        assert!((mid.components[0] - 0.4).abs() < 1e-4);
+        assert!((mid.components[1] - 0.15).abs() < 1e-4);
         assert!((mid.components[2] - 150.).abs() < 1e-4);
         assert!((mid.components[3] - 0.5).abs() < 1e-4);
     }
