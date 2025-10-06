@@ -475,7 +475,7 @@ impl<CS: ColorSpace> AlphaColor<CS> {
             .un_premultiply()
     }
 
-    /// Interpolate colors in without premultiplying alpha (so in unpremultiplied "straight" alpha space).
+    /// Interpolate colors without premultiplying alpha (in unpremultiplied "straight" alpha space).
     ///
     /// Note: this function doesn't fix up hue in cylindrical spaces. It is
     /// still useful if the hue angles are compatible, particularly if the
